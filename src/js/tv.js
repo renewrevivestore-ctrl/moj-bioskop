@@ -2,6 +2,58 @@
 const TV = {
   placeholder: 'Pretraži TV kanale…',
   data: null, country: 'home', category: '', q: '', limit: 120,
+  onlyWorking: Store.get('tvOnlyWorking', true),
+  queue: [], running: 0, runId: 0,
+
+  // ---------- Provera da li kanal radi (rezultat se pamti 6 sati) ----------
+  health(id) {
+    const hh = Store.get('tvHealth', {})[id];
+    return hh && Date.now() - hh.ts < 6 * 3600e3 ? hh : null;
+  },
+  setHealth(id, ok, src) {
+    const all = Store.get('tvHealth', {});
+    all[id] = { ok, src, ts: Date.now() };
+    Store.set('tvHealth', all);
+  },
+  async checkChannel(c) {
+    for (let i = 0; i < Math.min(c.sources.length, 3); i++) {
+      const s = c.sources[i];
+      const r = await window.api.checkStream(s.url, s.referer, s.ua).catch(() => ({ ok: false }));
+      if (r.ok) { this.setHealth(c.id, true, i); return true; }
+    }
+    this.setHealth(c.id, false);
+    return false;
+  },
+  checkVisible(channels) {
+    const run = ++this.runId;
+    this.queue = channels.filter((c) => !this.health(c.id));
+    const next = async () => {
+      if (run !== this.runId) return;
+      const c = this.queue.shift();
+      if (!c) { this.running--; this.updateCount(); return; }
+      this.mark(c.id, 'checking');
+      const ok = await this.checkChannel(c);
+      if (run === this.runId) this.mark(c.id, ok ? 'ok' : 'bad');
+      next();
+    };
+    this.running = Math.min(8, this.queue.length);
+    for (let i = 0; i < this.running; i++) next();
+    this.updateCount();
+  },
+  mark(id, state) {
+    document.querySelectorAll(`.tv-tile[data-id="${CSS.escape(id)}"]`).forEach((t) => {
+      t.classList.remove('h-ok', 'h-bad', 'h-checking');
+      t.classList.add('h-' + state);
+    });
+    this.updateCount();
+  },
+  updateCount() {
+    const el = $('#tvCount'); if (!el) return;
+    const ok = document.querySelectorAll('.tv-grid .tv-tile.h-ok').length;
+    const bad = document.querySelectorAll('.tv-grid .tv-tile.h-bad').length;
+    const chk = document.querySelectorAll('.tv-grid .tv-tile:not(.h-ok):not(.h-bad)').length;
+    el.textContent = `Radi: ${ok}` + (bad ? ` · ne radi: ${bad}` : '') + (chk ? ` · proveravam: ${chk}` : '');
+  },
 
   async load(force) {
     if (this.data && !force) return this.data;
@@ -87,14 +139,17 @@ const TV = {
     }
 
     view.innerHTML = '';
+    view.classList.toggle('only-working', this.onlyWorking);
     view.append(
       h('div', { class: 'page-head' },
         h('h1', {}, 'TV uživo'),
         h('div', { class: 'filters' },
           sel(countryOpts, this.country, (v) => { if (v !== '-') { this.country = v; this.limit = 120; this.draw(view); } }),
           sel(catOpts, this.category, (v) => { this.category = v; this.limit = 120; this.draw(view); }),
-          h('span', { class: 'muted' }, `${list.length} kanala`),
-          h('button', { class: 'btn small ghost', title: 'Preuzmi najnoviju bazu kanala', onclick: async () => { view.innerHTML = ''; view.append(spinner('Osvežavam bazu…')); this.data = null; await this.load(true); this.draw(view); toast('Baza kanala osvežena'); } }, '⟳ Osveži'))),
+          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: this.onlyWorking, onchange: (e) => { this.onlyWorking = e.target.checked; Store.set('tvOnlyWorking', this.onlyWorking); $('#view').classList.toggle('only-working', this.onlyWorking); } }), 'Samo kanali koji rade'),
+          h('span', { class: 'muted', id: 'tvCount' }, `${list.length} kanala`),
+          h('button', { class: 'btn small ghost', title: 'Preuzmi najnoviju bazu kanala', onclick: async () => { view.innerHTML = ''; view.append(spinner('Osvežavam bazu…')); this.data = null; await this.load(true); this.draw(view); toast('Baza kanala osvežena'); } }, '⟳ Osveži'),
+          h('button', { class: 'btn small ghost', title: 'Ponovo proveri sve kanale', onclick: () => { Store.set('tvHealth', {}); this.draw(view); } }, 'Proveri ponovo'))),
     );
 
     if (!list.length) { view.append(emptyMsg(this.country === 'fav' ? 'Još nemaš omiljene kanale. Klikni ☆ na kanalu da ga dodaš.' : 'Nema kanala za izabrani filter.')); return; }
@@ -107,21 +162,26 @@ const TV = {
       grid.append(this.tile(c));
     });
     view.append(grid);
+    this.checkVisible(list.slice(0, this.limit));
     if (list.length > this.limit) view.append(h('button', { class: 'btn ghost more', onclick: () => { this.limit += 240; this.draw(view); } }, `Prikaži još (${list.length - this.limit})`));
-    view.append(h('div', { class: 'hint' }, 'Kanali su javno dostupni besplatni strimovi koje održava zajednica iptv-org. Neki rade samo u zemlji emitovanja ili povremeno nisu aktivni — tada probaj „Drugi izvor” u plejeru ili drugi kanal.'));
+    view.append(h('div', { class: 'hint' }, 'Zelena tačka = kanal radi, crvena = trenutno ne radi (provera se ponavlja na 6 sati). Kanali su javno dostupni besplatni strimovi iz baze iptv-org; neki rade samo u zemlji emitovanja ili povremeno nisu aktivni.'));
   },
 
   tile(c) {
     const fav = this.favs().includes(c.id);
     const star = h('button', { class: 'star' + (fav ? ' on' : ''), title: 'Omiljeni', onclick: (e) => { e.stopPropagation(); const on = this.toggleFav(c.id); star.classList.toggle('on', on); star.textContent = on ? '★' : '☆'; } }, fav ? '★' : '☆');
-    return h('div', { class: 'tv-tile', tabindex: 0, onclick: () => this.play(c), onkeydown: (e) => e.key === 'Enter' && this.play(c) },
+    const hs = this.health(c.id);
+    return h('div', { class: 'tv-tile' + (hs ? (hs.ok ? ' h-ok' : ' h-bad') : ''), 'data-id': c.id, tabindex: 0, onclick: () => this.play(c), onkeydown: (e) => e.key === 'Enter' && this.play(c) },
       star,
+      h('span', { class: 'hdot', title: 'Status kanala' }),
       h('div', { class: 'tv-logo' }, c.logo ? h('img', { src: c.logo, loading: 'lazy', alt: '', onerror: (e) => e.target.replaceWith(h('span', {}, c.name.slice(0, 2).toUpperCase())) }) : h('span', {}, c.name.slice(0, 2).toUpperCase())),
       h('div', { class: 'tv-name', title: c.name }, c.name),
       h('div', { class: 'tv-meta' }, [this.cname(c.country), c.categories.slice(0, 2).map((x) => this.catName(x)).join(', ')].filter(Boolean).join(' · ')));
   },
 
   play(c) {
-    Player.playLive({ title: `${c.name}${c.country ? ' · ' + this.cname(c.country) : ''}`, sources: c.sources });
+    const hs = this.health(c.id);
+    const sources = hs && hs.ok && hs.src ? [c.sources[hs.src], ...c.sources.filter((_, i) => i !== hs.src)] : c.sources;
+    Player.playLive({ title: `${c.name}${c.country ? ' · ' + this.cname(c.country) : ''}`, sources, channelId: c.id });
   },
 };

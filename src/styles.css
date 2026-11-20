@@ -127,6 +127,15 @@ main#view::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 6px; }
 .tv-logo span { font-size: 24px; font-weight: 800; color: #888; }
 .tv-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tv-meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hdot { position: absolute; top: 11px; left: 11px; width: 9px; height: 9px; border-radius: 50%; background: #555; z-index: 2; }
+.tv-tile.h-checking .hdot { background: var(--warn); animation: pulse 1s infinite alternate; }
+.tv-tile.h-ok .hdot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.tv-tile.h-bad { opacity: .45; }
+.tv-tile.h-bad .hdot { background: #c33; }
+.only-working .tv-tile.h-bad { display: none; }
+@keyframes pulse { to { opacity: .3; } }
+.check { display: inline-flex; align-items: center; gap: 6px; color: #ccc; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; }
 .star { position: absolute; top: 6px; right: 8px; background: none; border: 0; font-size: 18px; color: #777; z-index: 2; }
 .star.on { color: #f5c518; }
 

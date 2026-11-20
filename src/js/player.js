@@ -96,6 +96,7 @@ const Player = {
   onError() {
     if (!this.item || this.item.youtube || !$('#pVideo').currentSrc && !this.hls) return;
     if (!this.nextSource(false)) {
+      if (this.item.live && this.item.channelId) { TV.setHealth(this.item.channelId, false); TV.mark(this.item.channelId, 'bad'); }
       this.msg(this.item.live
         ? 'Kanal trenutno nije dostupan (možda je ograničen na zemlju emitovanja ili je ugašen). Probaj drugi kanal.'
         : 'Video ne može da se pusti. Otvori ga na izvornom sajtu iz detalja naslova.');

@@ -9,6 +9,10 @@ try { autoUpdater = require('electron-updater').autoUpdater; } catch (e) { /* de
 const UA = `MojBioskop v${app.getVersion()}`;
 let win = null;
 const streamHeaders = new Map(); // host -> { referer, ua }
+let activeStream = null; // zaglavlja kanala koji se trenutno gleda (važe i za segmente na drugim serverima)
+const API_HOSTS = /(^|\.)(archive\.org|googleapis\.com|opensubtitles\.com|github\.io|githubusercontent\.com|google\.com|youtube\.com|youtube-nocookie\.com|ytimg\.com|duckduckgo\.com)$/;
+// Neki serveri odbijaju Electron, pa se predstavljamo kao običan Chrome
+const CHROME_UA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
 const cacheDir = () => {
   const d = path.join(app.getPath('userData'), 'cache');
@@ -30,6 +34,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // TV strimovi su često na http:// adresama
+      allowRunningInsecureContent: true,
     },
   });
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
@@ -46,13 +52,15 @@ function createWindow() {
 
 // Neki TV strimovi traže Referer / User-Agent; YouTube embed traži Referer
 function setupHeaders() {
-  session.defaultSession.webRequest.onBeforeSendHeaders((details, cb) => {
+  session.defaultSession.setUserAgent(CHROME_UA);
+  const ses = session.defaultSession.webRequest;
+  ses.onBeforeSendHeaders((details, cb) => {
     const h = details.requestHeaders;
     try {
       const u = new URL(details.url);
-      const s = streamHeaders.get(u.host);
+      const s = streamHeaders.get(u.host) || (activeStream && !API_HOSTS.test(u.host) && /^(xhr|media|other)$/.test(details.resourceType) ? activeStream : null);
       if (s) {
-        if (s.referer) h['Referer'] = s.referer;
+        if (s.referer) { h['Referer'] = s.referer; try { h['Origin'] = new URL(s.referer).origin; } catch (_) {} }
         if (s.ua) h['User-Agent'] = s.ua;
       }
       if (/(^|\.)(youtube|youtube-nocookie)\.com$/.test(u.host) && !h['Referer']) {
@@ -60,6 +68,19 @@ function setupHeaders() {
       }
     } catch (_) {}
     cb({ requestHeaders: h });
+  });
+  // Aplikacija je lokalna stranica, a većina TV servera ne šalje CORS dozvolu,
+  // pa bez ovoga hls.js ne može da pročita listu segmenata. Dozvolu dodajemo sami.
+  ses.onHeadersReceived((details, cb) => {
+    if (!/^(xhr|media|other)$/.test(details.resourceType)) return cb({});
+    const rh = {};
+    for (const [k, v] of Object.entries(details.responseHeaders || {})) {
+      if (!/^access-control-allow-(origin|credentials|headers|methods)$/i.test(k)) rh[k] = v;
+    }
+    rh['Access-Control-Allow-Origin'] = ['*'];
+    rh['Access-Control-Allow-Headers'] = ['*'];
+    rh['Access-Control-Allow-Methods'] = ['GET, HEAD, OPTIONS'];
+    cb({ responseHeaders: rh });
   });
 }
 
@@ -136,10 +157,30 @@ ipcMain.handle('catalog:load', async (_e, url) => {
 ipcMain.handle('stream:headers', (_e, url, referer, ua) => {
   try {
     const host = new URL(url).host;
-    if (referer || ua) streamHeaders.set(host, { referer, ua });
-    else streamHeaders.delete(host);
+    if (referer || ua) { streamHeaders.set(host, { referer, ua }); activeStream = { referer, ua }; }
+    else { streamHeaders.delete(host); activeStream = null; }
   } catch (_) {}
   return true;
+});
+
+// Provera da li kanal radi: preuzmi početak m3u8 liste (bez CORS ograničenja)
+ipcMain.handle('stream:check', async (_e, url, referer, ua) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const headers = { 'User-Agent': ua || CHROME_UA };
+    if (referer) headers['Referer'] = referer;
+    const res = await net.fetch(url, { headers, signal: ctrl.signal });
+    if (!res.ok) return { ok: false, status: res.status };
+    const reader = res.body.getReader();
+    const { value } = await reader.read();
+    try { ctrl.abort(); } catch (_) {}
+    const head = Buffer.from(value || []).toString('utf8', 0, 200).trim();
+    const type = res.headers.get('content-type') || '';
+    return { ok: head.startsWith('#EXTM3U') || /mpegurl|video|octet-stream|mp2t/i.test(type) };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e).slice(0, 80) };
+  } finally { clearTimeout(t); }
 });
 
 ipcMain.handle('open:external', (_e, url) => {

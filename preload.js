@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   clearCache: () => ipcRenderer.invoke('cache:clear'),
   catalog: (url) => ipcRenderer.invoke('catalog:load', url),
   streamHeaders: (url, referer, ua) => ipcRenderer.invoke('stream:headers', url, referer, ua),
+  checkStream: (url, referer, ua) => ipcRenderer.invoke('stream:check', url, referer, ua),
   open: (url) => ipcRenderer.invoke('open:external', url),
   pickSubtitle: () => ipcRenderer.invoke('file:subtitle'),
   version: () => ipcRenderer.invoke('app:version'),

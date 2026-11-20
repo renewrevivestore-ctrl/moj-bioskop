@@ -1,7 +1,7 @@
 {
   "name": "moj-bioskop",
   "productName": "Moj Bioskop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Licna platforma za besplatne filmove, serije i TV kanale",
   "main": "main.js",
   "author": "Moj Bioskop",
