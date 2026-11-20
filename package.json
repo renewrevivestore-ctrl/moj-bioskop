@@ -1,0 +1,39 @@
+{
+  "name": "moj-bioskop",
+  "productName": "Moj Bioskop",
+  "version": "1.0.0",
+  "description": "Licna platforma za besplatne filmove, serije i TV kanale",
+  "main": "main.js",
+  "author": "Moj Bioskop",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64",
+    "release": "electron-builder --win --x64 --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "hls.js": "^1.5.17"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "rs.mojbioskop.app",
+    "productName": "Moj Bioskop",
+    "files": ["main.js", "preload.js", "src/**", "data/**", "build/icon.png", "node_modules/**"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Moj Bioskop",
+      "artifactName": "MojBioskop-Setup-${version}.${ext}"
+    },
+    "publish": [{ "provider": "github", "owner": "TVOJ-GITHUB-NALOG", "repo": "moj-bioskop", "releaseType": "release" }]
+  }
+}

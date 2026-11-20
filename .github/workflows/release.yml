@@ -1,0 +1,33 @@
+# Pravi Windows instalaciju i objavljuje je kao GitHub Release.
+# Aplikacije koje su već instalirane same preuzimaju novu verziju.
+# Pokreće se kada pošalješ tag, npr: git tag v1.0.1 && git push origin v1.0.1
+name: Izdanje za Windows
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Upisi GitHub nalog u podesavanja
+        shell: bash
+        run: |
+          OWNER="${GITHUB_REPOSITORY%%/*}"; REPO="${GITHUB_REPOSITORY##*/}"
+          sed -i "s/TVOJ-GITHUB-NALOG/$OWNER/g; s/\"repo\": \"moj-bioskop\"/\"repo\": \"$REPO\"/" package.json
+          sed -i "s/TVOJ-GITHUB-NALOG/$OWNER/; s/GITHUB_REPO: 'moj-bioskop'/GITHUB_REPO: '$REPO'/" src/js/config.js
+      - name: Napravi i objavi instalaciju
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
